@@ -345,552 +345,420 @@
         }
     </script>
     <script>
-        window.onload = function() {
-            const { jsPDF } = window.jspdf;
+    const screens = {
+        list: document.getElementById('patient-list-screen'),
+        details: document.getElementById('patient-details-screen'),
+        capture: document.getElementById('capture-screen'),
+    };
 
-            const screens = {
-                list: document.getElementById('patient-list-screen'),
-                form: document.getElementById('patient-form-screen'),
-                report: document.getElementById('report-screen')
+    const patientList = document.getElementById('patient-list');
+    const newPatientBtn = document.getElementById('new-patient-btn');
+    const backBtn = document.getElementById('back-btn');
+    const savePatientBtn = document.getElementById('save-patient-btn');
+    const patientNameInput = document.getElementById('patient-name');
+    const patientAgeInput = document.getElementById('patient-age');
+    const patientIdInput = document.getElementById('patient-id');
+
+    const patientDetailsScreen = document.getElementById('patient-details-screen');
+    const detailsName = document.getElementById('details-name');
+    const detailsAge = document.getElementById('details-age');
+    const detailsId = document.getElementById('details-id');
+    const reportList = document.getElementById('report-list');
+    const captureBtn = document.getElementById('capture-btn');
+    const exportPdfBtn = document.getElementById('export-pdf-btn');
+
+    const videoStream = document.getElementById('video-stream');
+    const takePhotoButton = document.getElementById('take-photo-btn');
+    const cameraBtn = document.getElementById('camera-btn');
+    const closeCameraBtn = document.getElementById('close-camera-btn');
+    const uploadBtn = document.getElementById('upload-btn');
+    const processBtn = document.getElementById('process-btn');
+    const photoCanvas = document.getElementById('photo-canvas');
+    const processedCanvas = document.getElementById('processed-canvas');
+    const photoDisplay = document.getElementById('photo-display');
+    const loadingMessage = document.getElementById('loading-message');
+    const cameraModal = document.getElementById('camera-modal');
+
+    const modal = document.getElementById('info-modal');
+    const modalContent = document.getElementById('info-modal-content');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+
+    let patients = [];
+    let currentPatient = null;
+    let currentImage = null;
+    let stream = null;
+    let analysisResult = null;
+    let processedImage = null;
+
+    // --- Service Worker para PWA (offline) ---
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            const serviceWorkerBlob = new Blob([`
+                self.addEventListener('fetch', (event) => {
+                    event.respondWith(fetch(event.request));
+                });
+            `], { type: 'application/javascript' });
+            const serviceWorkerUrl = URL.createObjectURL(serviceWorkerBlob);
+            navigator.serviceWorker.register(serviceWorkerUrl).then(registration => {
+                console.log('Service Worker registrado con éxito:', registration);
+            }).catch(error => {
+                console.error('Fallo el registro del Service Worker:', error);
+            });
+        });
+    }
+
+    function showScreen(screen) {
+        Object.values(screens).forEach(s => s.classList.add('hidden'));
+        screen.classList.remove('hidden');
+    }
+
+    function showModal(title, body) {
+        modalTitle.textContent = title;
+        modalBody.innerHTML = body;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    closeModalBtn.onclick = () => {
+        modal.classList.remove('flex');
+        modal.classList.add('hidden');
+    };
+
+    window.onclick = (event) => {
+        if (event.target === modal) {
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+        }
+    };
+
+    function loadPatients() {
+        const storedPatients = localStorage.getItem('patients');
+        if (storedPatients) {
+            patients = JSON.parse(storedPatients);
+        }
+    }
+
+    function savePatients() {
+        localStorage.setItem('patients', JSON.stringify(patients));
+    }
+
+    function renderPatientList() {
+        patientList.innerHTML = '';
+        if (patients.length === 0) {
+            patientList.innerHTML = '<p class="text-gray-500 text-center mt-4">No hay pacientes registrados.</p>';
+        }
+        patients.forEach(patient => {
+            const patientElement = document.createElement('div');
+            patientElement.className = 'p-4 border-b border-gray-200 cursor-pointer hover:bg-gray-100';
+            patientElement.innerHTML = `
+                <h3 class="font-bold text-gray-800">${patient.name}</h3>
+                <p class="text-gray-600">ID: ${patient.id}</p>
+            `;
+            patientElement.onclick = () => {
+                currentPatient = patient;
+                renderPatientDetails();
+                showScreen(screens.details);
             };
-            const patientListEl = document.getElementById('patient-list');
-            const patientForm = document.getElementById('patient-form');
-            const addPatientBtn = document.getElementById('add-patient-btn');
-            const cancelFormBtn = document.getElementById('cancel-form-btn');
-            const analyzeBtn = document.getElementById('analyze-btn');
-            const backToListBtn = document.getElementById('back-to-list-btn');
-            const exportPdfBtn = document.getElementById('export-pdf-btn');
-            const loadingOverlay = document.getElementById('loading-overlay');
-            const alertModal = document.getElementById('alert-modal');
-            const alertTitle = document.getElementById('alert-title');
-            const alertMessage = document.getElementById('alert-message');
-            const alertOkBtn = document.getElementById('alert-ok-btn');
-            const imageInput = document.getElementById('colpo-image');
-            const imagePreview = document.getElementById('image-preview');
-            const signatureImageInput = document.getElementById('signature-image');
-            const signaturePreview = document.getElementById('signature-preview');
-            const reportEditor = document.getElementById('report-editor');
-            const patientSearch = document.getElementById('patient-search');
-            const cameraBtn = document.getElementById('camera-btn');
-            const cameraModal = document.getElementById('camera-modal');
-            const videoStream = document.getElementById('video-stream');
-            const canvasCapture = document.getElementById('canvas-capture');
-            const captureBtn = document.getElementById('capture-btn');
-            const closeCameraBtn = document.getElementById('close-camera-btn');
-            const darkModeToggle = document.getElementById('dark-mode-toggle');
-            const doctorNameInput = document.getElementById('doctor-name');
+            patientList.appendChild(patientElement);
+        });
+    }
 
-            let stream;
-            let patients = [];
-            let currentPatientId = null;
-            let currentImageBase64 = null;
-            let currentSignatureBase64 = null;
-            let currentReportText = "";
-            let currentDoctorName = "";
+    function renderPatientDetails() {
+        detailsName.textContent = currentPatient.name;
+        detailsAge.textContent = currentPatient.age;
+        detailsId.textContent = currentPatient.id;
+        reportList.innerHTML = '';
+        currentPatient.reports.forEach((report, index) => {
+            const reportElement = document.createElement('div');
+            reportElement.className = 'p-4 border-b border-gray-200';
+            reportElement.innerHTML = `
+                <p class="text-gray-600">Fecha: ${report.date}</p>
+                <p class="text-gray-600">Resultados: ${report.results || 'No disponibles'}</p>
+            `;
+            reportList.appendChild(reportElement);
+        });
+    }
 
-            function savePatients() {
-                localStorage.setItem('colpovision-patients', JSON.stringify(patients));
+    newPatientBtn.onclick = () => {
+        patientNameInput.value = '';
+        patientAgeInput.value = '';
+        patientIdInput.value = '';
+        showScreen(screens.details);
+    };
+
+    backBtn.onclick = () => {
+        showScreen(screens.list);
+    };
+
+    savePatientBtn.onclick = () => {
+        const name = patientNameInput.value.trim();
+        const age = patientAgeInput.value.trim();
+        const id = patientIdInput.value.trim();
+        if (name && age && id) {
+            let patient = patients.find(p => p.id === id);
+            if (patient) {
+                patient.name = name;
+                patient.age = age;
+            } else {
+                patient = { name, age, id, reports: [] };
+                patients.push(patient);
             }
+            currentPatient = patient;
+            savePatients();
+            renderPatientList();
+            renderPatientDetails();
+            showScreen(screens.details);
+        } else {
+            showModal('Error', 'Por favor, llena todos los campos.');
+        }
+    };
 
-            function loadPatients() {
-                const storedPatients = localStorage.getItem('colpovision-patients');
-                try {
-                    if (storedPatients) {
-                        patients = JSON.parse(storedPatients);
-                    }
-                } catch (e) {
-                    console.error("Error al cargar pacientes desde localStorage", e);
-                    patients = [];
-                }
-            }
-            
-            function toggleDarkMode() {
-                document.body.classList.toggle('dark');
-                localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
-            }
+    captureBtn.onclick = () => {
+        showScreen(screens.capture);
+        processedCanvas.classList.add('hidden');
+        processBtn.classList.add('hidden');
+        photoDisplay.classList.add('hidden');
+    };
 
-            function applySavedTheme() {
-                if (localStorage.getItem('theme') === 'dark') {
-                    document.body.classList.add('dark');
-                }
-            }
-            
-            darkModeToggle.addEventListener('click', toggleDarkMode);
-
-            function showModal(title, message) {
-                alertTitle.textContent = title;
-                alertMessage.textContent = message;
-                alertModal.classList.remove('hidden');
-                alertModal.classList.add('flex');
-            }
-
-            alertOkBtn.addEventListener('click', () => {
-                alertModal.classList.add('hidden');
-                alertModal.classList.remove('flex');
+    // --- Lógica de la cámara ---
+    cameraBtn.addEventListener('click', async () => {
+        try {
+            // CAMBIO AQUÍ: `facingMode: 'environment'` para usar la cámara trasera
+            stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment' }, 
+                audio: false 
             });
+            videoStream.srcObject = stream;
+            cameraModal.classList.remove('hidden');
+            cameraModal.classList.add('flex');
+        } catch (err) {
+            console.error("Error al acceder a la cámara: ", err);
+            showModal('Error de Cámara', 'No se pudo acceder a la cámara. Por favor, revisa los permisos.');
+        }
+    });
 
-            function showScreen(screen) {
-                Object.values(screens).forEach(s => s.classList.add('hidden'));
-                screen.classList.remove('hidden');
-            }
+    closeCameraBtn.onclick = () => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            videoStream.srcObject = null;
+        }
+        cameraModal.classList.remove('flex');
+        cameraModal.classList.add('hidden');
+    };
 
-            function renderPatientList(filterText = '') {
-                patientListEl.innerHTML = '';
-                const filteredPatients = patients.filter(p => p.name.toLowerCase().includes(filterText.toLowerCase()));
+    takePhotoButton.onclick = () => {
+        const context = photoCanvas.getContext('2d');
+        const videoWidth = videoStream.videoWidth;
+        const videoHeight = videoStream.videoHeight;
+        photoCanvas.width = videoWidth;
+        photoCanvas.height = videoHeight;
+        context.drawImage(videoStream, 0, 0, videoWidth, videoHeight);
+        const dataURL = photoCanvas.toDataURL('image/jpeg', 0.8);
+        currentImage = dataURL;
+        photoDisplay.src = dataURL;
+        photoDisplay.classList.remove('hidden');
+        processBtn.classList.remove('hidden');
+        showModal('Foto Tomada', '¡Foto capturada con éxito!');
+        closeCameraBtn.click();
+    };
 
-                if (filteredPatients.length === 0) {
-                    patientListEl.innerHTML = `<p class="text-center text-gray-500 dark:text-gray-400 italic md:col-span-3">No hay pacientes registrados con ese nombre.</p>`;
-                }
-
-                filteredPatients.forEach(patient => {
-                    const patientCard = document.createElement('div');
-                    patientCard.className = 'patient-card p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-600 cursor-pointer flex flex-col justify-between transform hover:scale-105 transition-all duration-300';
-                    patientCard.innerHTML = `
-                        <div>
-                            <p class="font-bold text-lg text-blue-800 dark:text-blue-300">${patient.name}</p>
-                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Edad: ${patient.age} años</p>
-                        </div>
-                        <div class="flex space-x-2 mt-4 self-end">
-                            <button class="view-btn text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 p-2 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900 transition-colors" data-id="${patient.id}">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                                  <path d="M0 0h24v24H0z" stroke="none"/>
-                                  <path d="M10 12a2 2 0 104 0 2 2 0 10-4 0m-7.5 4a8.97 8.97 0 01-1.4-2.5C1.6 11.2 5.6 6 12 6s10.4 5.2 9.9 7.5a8.97 8.97 0 01-1.4 2.5m-15 0l-3.5 3.5m18.5-3.5l3.5 3.5"/>
-                                </svg>
-                            </button>
-                            <button class="delete-btn text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900 transition-colors" data-id="${patient.id}">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                                  <path d="M0 0h24v24H0z" stroke="none"/>
-                                  <path d="M4 7h16M10 11v6m4-6v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                    patientListEl.appendChild(patientCard);
-                });
-            }
-
-            patientSearch.addEventListener('input', (event) => {
-                renderPatientList(event.target.value);
-            });
-
-            addPatientBtn.addEventListener('click', () => {
-                patientForm.reset();
-                document.getElementById('patient-id').value = '';
-                document.getElementById('form-title').textContent = 'Añadir Nueva Paciente';
-                imagePreview.src = '';
-                imagePreview.classList.add('hidden');
-                signaturePreview.src = '';
-                signaturePreview.classList.add('hidden');
-                document.getElementById('analyze-btn').parentElement.classList.add('hidden');
-                showScreen(screens.form);
-            });
-
-            cancelFormBtn.addEventListener('click', () => {
-                showScreen(screens.list);
-            });
-
-            imageInput.addEventListener('change', (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = e => {
-                        imagePreview.src = e.target.result;
-                        imagePreview.classList.remove('hidden');
-                        currentImageBase64 = e.target.result.split(',')[1];
-                        document.getElementById('analyze-btn').parentElement.classList.remove('hidden');
-                    };
-                    reader.readAsDataURL(file);
-                } else {
-                    imagePreview.src = '';
-                    imagePreview.classList.add('hidden');
-                    currentImageBase64 = null;
-                    document.getElementById('analyze-btn').parentElement.classList.add('hidden');
-                }
-            });
-
-            cameraBtn.addEventListener('click', async () => {
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    videoStream.srcObject = stream;
-                    cameraModal.classList.remove('hidden');
-                    cameraModal.classList.add('flex');
-                } catch (err) {
-                    console.error("Error al acceder a la cámara: ", err);
-                    showModal('Error de Cámara', 'No se pudo acceder a la cámara. Por favor, revisa los permisos.');
-                }
-            });
-
-            captureBtn.addEventListener('click', () => {
-                const context = canvasCapture.getContext('2d');
-                canvasCapture.width = videoStream.videoWidth;
-                canvasCapture.height = videoStream.videoHeight;
-                context.drawImage(videoStream, 0, 0, canvasCapture.width, canvasCapture.height);
-                
-                const imageDataUrl = canvasCapture.toDataURL('image/jpeg');
-                imagePreview.src = imageDataUrl;
-                imagePreview.classList.remove('hidden');
-                currentImageBase64 = imageDataUrl.split(',')[1];
-                document.getElementById('analyze-btn').parentElement.classList.remove('hidden');
-                
-                closeCameraModal();
-            });
-
-            function closeCameraModal() {
-                if (stream) {
-                    const tracks = stream.getTracks();
-                    tracks.forEach(track => track.stop());
-                }
-                videoStream.srcObject = null;
-                cameraModal.classList.add('hidden');
-                cameraModal.classList.remove('flex');
-            }
-
-            closeCameraBtn.addEventListener('click', closeCameraModal);
-
-            signatureImageInput.addEventListener('change', (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = e => {
-                        signaturePreview.src = e.target.result;
-                        signaturePreview.classList.remove('hidden');
-                        currentSignatureBase64 = e.target.result.split(',')[1];
-                    };
-                    reader.readAsDataURL(file);
-                } else {
-                    signaturePreview.src = '';
-                    signaturePreview.classList.add('hidden');
-                    currentSignatureBase64 = null;
-                }
-            });
-
-            patientForm.addEventListener('submit', (event) => {
-                event.preventDefault();
-
-                if (!document.getElementById('name').value || !document.getElementById('age').value || !document.getElementById('doctor-name').value) {
-                    showModal('Error', 'Por favor, rellena los campos obligatorios.');
-                    return;
-                }
-
-                const id = document.getElementById('patient-id').value || crypto.randomUUID();
-                const doctorName = document.getElementById('doctor-name').value;
-                const name = document.getElementById('name').value;
-                const age = document.getElementById('age').value;
-                const socialSecurity = document.getElementById('social-security').value;
-                const medicalHistory = document.getElementById('medical-history').value;
-                const imageBase64 = currentImageBase64;
-                const signatureImageBase64 = currentSignatureBase64;
-
-                const newPatient = { id, doctorName, name, age, socialSecurity, medicalHistory, imageBase64, reportText: "", signatureImageBase64 };
-
-                const patientIndex = patients.findIndex(p => p.id === id);
-                if (patientIndex > -1) {
-                    patients[patientIndex] = newPatient;
-                } else {
-                    patients.push(newPatient);
-                }
-                
-                savePatients();
-                showModal('Éxito', `Datos de ${name} guardados correctamente.`);
-                showScreen(screens.list);
-                renderPatientList();
-            });
-
-            patientListEl.addEventListener('click', (event) => {
-                const target = event.target.closest('button');
-                if (!target) return;
-
-                const id = target.dataset.id;
-                const patient = patients.find(p => p.id === id);
-
-                if (target.classList.contains('view-btn')) {
-                    if (patient) {
-                        currentPatientId = id;
-                        document.getElementById('patient-id').value = patient.id;
-                        document.getElementById('doctor-name').value = patient.doctorName;
-                        document.getElementById('name').value = patient.name;
-                        document.getElementById('age').value = patient.age;
-                        document.getElementById('social-security').value = patient.socialSecurity;
-                        document.getElementById('medical-history').value = patient.medicalHistory;
-                        
-                        if (patient.imageBase64) {
-                            imagePreview.src = `data:image/jpeg;base64,${patient.imageBase64}`;
-                            imagePreview.classList.remove('hidden');
-                            currentImageBase64 = patient.imageBase64;
-                            document.getElementById('analyze-btn').parentElement.classList.remove('hidden');
-                        } else {
-                            imagePreview.src = '';
-                            imagePreview.classList.add('hidden');
-                            currentImageBase64 = null;
-                            document.getElementById('analyze-btn').parentElement.classList.add('hidden');
-                        }
-
-                        if (patient.signatureImageBase64) {
-                            signaturePreview.src = `data:image/png;base64,${patient.signatureImageBase64}`;
-                            signaturePreview.classList.remove('hidden');
-                            currentSignatureBase64 = patient.signatureImageBase64;
-                        } else {
-                            signaturePreview.src = '';
-                            signaturePreview.classList.add('hidden');
-                            currentSignatureBase64 = null;
-                        }
-
-                        document.getElementById('form-title').textContent = 'Editar Paciente';
-                        if (patient.reportText) {
-                            reportEditor.textContent = patient.reportText;
-                            document.getElementById('report-patient-name').textContent = patient.name;
-                            document.getElementById('report-patient-age').textContent = patient.age;
-                            document.getElementById('report-patient-social-security').textContent = patient.socialSecurity;
-                            document.getElementById('report-patient-history').textContent = patient.medicalHistory;
-                            document.getElementById('report-image').src = `data:image/jpeg;base64,${patient.imageBase64}`;
-                            showScreen(screens.report);
-                        } else {
-                            showScreen(screens.form);
-                        }
-                    }
-                } else if (target.classList.contains('delete-btn')) {
-                    patients = patients.filter(p => p.id !== id);
-                    savePatients();
-                    showModal('Eliminado', `Paciente ${patient.name} eliminado.`);
-                    renderPatientList();
-                }
-            });
-            
-            analyzeBtn.addEventListener('click', async () => {
-                const patient = patients.find(p => p.id === currentPatientId);
-
-                if (!patient || !patient.imageBase64) {
-                    showModal('Error de Análisis', 'No hay una imagen para analizar. Por favor, sube una imagen de colposcopia.');
-                    return;
-                }
-
-                // Muestra la pantalla de carga
-                loadingOverlay.style.display = 'flex';
-
-                try {
-                    // Ahora la llamada es a nuestro propio servidor FastAPI
-                    const response = await fetch('https://colpoai.onrender.com/analyze_colposcopy/', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            image_data: patient.imageBase64,
-                            medical_history: patient.medicalHistory,
-                        }),
-                    });
-
-                    // Verificamos que la respuesta del servidor sea exitosa
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.detail || 'Error en la respuesta del servidor');
-                    }
-
-                    const result = await response.json();
-                    const currentReportText = result.report;
-
-                    // Usamos el informe que nos devolvió el servidor
-                    reportEditor.textContent = currentReportText;
-                    
-                    // Guardamos el informe en la información del paciente
-                    const currentPatient = patients.find(p => p.id === currentPatientId);
-                    if (currentPatient) {
-                        currentPatient.reportText = currentReportText;
-                        savePatients();
-                    }
-
-                    document.getElementById('report-patient-name').textContent = patient.name;
-                    document.getElementById('report-patient-age').textContent = patient.age;
-                    document.getElementById('report-patient-social-security').textContent = patient.socialSecurity;
-                    document.getElementById('report-patient-history').textContent = patient.medicalHistory;
-                    document.getElementById('report-image').src = `data:image/jpeg;base64,${patient.imageBase64}`;
-                    showScreen(screens.report);
-
-                } catch (error) {
-                    console.error('Error al generar el informe:', error);
-                    showModal('Error de Análisis', `Hubo un problema al generar el informe. Por favor, verifica que tu servidor esté activo. Detalle: ${error.message}`);
-                } finally {
-                    loadingOverlay.style.display = 'none';
-                }
-            });
-            
-            backToListBtn.addEventListener('click', () => {
-                showScreen(screens.list);
-            });
-            
-            function addTextWithPagination(doc, text, x, y, maxWidth, lineHeight, fontSize, isBold = false, isBullet = false) {
-                doc.setFont(isBold ? 'Helvetica-Bold' : 'Helvetica');
-                doc.setFontSize(fontSize);
-                const lines = doc.splitTextToSize(text, maxWidth);
-                let currentY = y;
-            
-                lines.forEach(line => {
-                    if (currentY > doc.internal.pageSize.height - 30) {
-                        doc.addPage();
-                        currentY = 20;
-                        doc.setFontSize(10);
-                        doc.setTextColor(150);
-                        doc.text(`Página ${doc.internal.getNumberOfPages()}`, doc.internal.pageSize.width - 20, doc.internal.pageSize.height - 10);
-                        doc.setFontSize(fontSize);
-                        doc.setTextColor(0);
-                        doc.setFont(isBold ? 'Helvetica-Bold' : 'Helvetica');
-                    }
-                    if (isBullet) {
-                        doc.text('• ' + line, x, currentY);
-                    } else {
-                        doc.text(line, x, currentY);
-                    }
-                    currentY += lineHeight;
-                });
-                return currentY;
-            }
-
-            const loadImage = (src) => {
-                return new Promise((resolve, reject) => {
+    uploadBtn.onclick = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
                     const img = new Image();
-                    img.onload = () => resolve(img);
-                    img.onerror = reject;
-                    img.src = src;
-                });
+                    img.onload = () => {
+                        const context = photoCanvas.getContext('2d');
+                        photoCanvas.width = img.width;
+                        photoCanvas.height = img.height;
+                        context.drawImage(img, 0, 0);
+                        currentImage = photoCanvas.toDataURL('image/jpeg', 0.8);
+                        photoDisplay.src = currentImage;
+                        photoDisplay.classList.remove('hidden');
+                        processBtn.classList.remove('hidden');
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+        input.click();
+    };
+
+    processBtn.onclick = async () => {
+        if (!currentImage) {
+            showModal('Error', 'Por favor, captura o sube una imagen primero.');
+            return;
+        }
+
+        loadingMessage.classList.remove('hidden');
+
+        try {
+            const base64Image = currentImage.split(',')[1];
+            const response = await fetch('https://colpoai.onrender.com/analyze_colposcopy/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ image: base64Image }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            analysisResult = data.analysis;
+            processedImage = data.processed_image;
+            showModal('Análisis Completo', `Resultado: ${analysisResult}`);
+
+            const img = new Image();
+            img.onload = () => {
+                const context = processedCanvas.getContext('2d');
+                processedCanvas.width = img.width;
+                processedCanvas.height = img.height;
+                context.drawImage(img, 0, 0);
+                processedCanvas.classList.remove('hidden');
+                processedImage = processedCanvas.toDataURL('image/jpeg');
             };
+            img.src = `data:image/jpeg;base64,${processedImage}`;
 
-            exportPdfBtn.addEventListener('click', async () => {
-                const patient = patients.find(p => p.id === currentPatientId);
-                if (!patient) return;
-            
-                const finalReportText = reportEditor.textContent;
-            
-                const doc = new jsPDF();
-                const pageWidth = doc.internal.pageSize.getWidth();
-                const margin = 20;
-                let y = 20;
-            
-                doc.setFont('Helvetica-Bold');
-                doc.setFontSize(22);
-                doc.setTextColor(30, 41, 59);
-                doc.text(patient.doctorName, pageWidth / 2, y, { align: 'center' });
-                y += 10;
-                doc.setFontSize(18);
-                doc.text('INFORME COLPOSCÓPICO', pageWidth / 2, y, { align: 'center' });
-                y += 15;
-            
-                doc.setDrawColor(226, 232, 240);
-                doc.line(margin, y, pageWidth - margin, y);
-                y += 10;
-            
-                const patientDataStartX = margin;
-                const patientDataWidth = pageWidth / 2 - margin - 10;
-                const imageColpoWidth = 60;
-                let imageColpoHeight = 0;
-                const imageColpoX = pageWidth - margin - imageColpoWidth;
-                let currentYForHeader = y;
+            currentPatient.reports.push({
+                date: new Date().toLocaleDateString('es-ES'),
+                image: currentImage,
+                results: analysisResult,
+                processed_image: processedImage
+            });
+            savePatients();
+            renderPatientDetails();
 
-                doc.setFont('Helvetica-Bold');
-                doc.setFontSize(14);
-                doc.setTextColor(51, 65, 85);
-                doc.text('Datos de la Paciente', patientDataStartX, currentYForHeader);
-                currentYForHeader += 8;
+        } catch (error) {
+            console.error('Error durante el análisis:', error);
+            showModal('Error de Análisis', 'Hubo un problema al procesar la imagen. Por favor, verifica el servidor.');
+        } finally {
+            loadingMessage.classList.add('hidden');
+        }
+    };
 
-                doc.setFont('Helvetica');
-                doc.setFontSize(12);
-                doc.setTextColor(75, 85, 99);
-                currentYForHeader = addTextWithPagination(doc, `Nombre: ${patient.name}`, patientDataStartX, currentYForHeader, patientDataWidth, 6, 12);
-                currentYForHeader = addTextWithPagination(doc, `Edad: ${patient.age} años`, patientDataStartX, currentYForHeader, patientDataWidth, 6, 12);
-                currentYForHeader = addTextWithPagination(doc, `Obra Social: ${patient.socialSecurity}`, patientDataStartX, currentYForHeader, patientDataWidth, 6, 12);
-                currentYForHeader = addTextWithPagination(doc, `Historial Médico: ${patient.medicalHistory}`, patientDataStartX, currentYForHeader, patientDataWidth, 6, 12);
-                
-                if (patient.imageBase64) {
-                    try {
-                        const img = await loadImage(`data:image/jpeg;base64,${patient.imageBase64}`);
-                        imageColpoHeight = (imageColpoWidth / img.naturalWidth) * img.naturalHeight;
-                        doc.addImage(img.src, 'JPEG', imageColpoX, y, imageColpoWidth, imageColpoHeight);
-                    } catch (error) {
-                        console.error("Error al cargar la imagen de colposcopia para PDF:", error);
-                        imageColpoHeight = imageColpoWidth * (3/4);
-                    }
+    exportPdfBtn.onclick = async () => {
+        if (!currentPatient) {
+            showModal('Error', 'Por favor, selecciona un paciente para exportar un informe.');
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        doc.setFontSize(18);
+        doc.setTextColor(50, 50, 50);
+        doc.text("Informe ColpoVision", 14, 22);
+
+        doc.setFontSize(12);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`Paciente: ${currentPatient.name}`, 14, 32);
+        doc.text(`ID: ${currentPatient.id}`, 14, 39);
+        doc.text(`Edad: ${currentPatient.age}`, 14, 46);
+        
+        const latestReport = currentPatient.reports[currentPatient.reports.length - 1];
+
+        if (latestReport) {
+            doc.setFontSize(14);
+            doc.setTextColor(50, 50, 50);
+            doc.text("Último Análisis", 14, 60);
+            doc.setFontSize(12);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`Fecha: ${latestReport.date}`, 14, 67);
+            doc.text(`Resultados: ${latestReport.results}`, 14, 74);
+            
+            const imgData = latestReport.image;
+            if (imgData) {
+                const img = new Image();
+                img.src = imgData;
+                await new Promise(resolve => img.onload = resolve);
+                const aspectRatio = img.width / img.height;
+                const imgWidth = 80;
+                const imgHeight = imgWidth / aspectRatio;
+                doc.text("Imagen Original", 14, 88);
+                doc.addImage(imgData, 'JPEG', 14, 95, imgWidth, imgHeight);
+
+                if (latestReport.processed_image) {
+                    const processedImg = new Image();
+                    processedImg.src = latestReport.processed_image;
+                    await new Promise(resolve => processedImg.onload = resolve);
+                    doc.text("Imagen Procesada", 110, 88);
+                    doc.addImage(latestReport.processed_image, 'JPEG', 110, 95, imgWidth, imgHeight);
                 }
-                
-                y = Math.max(currentYForHeader, y + imageColpoHeight) + 15;
-            
-                const sections = finalReportText.split(/(?=\n\nObservaciones Principales:|\n\nPosible Diagnóstico:|\n\nRecomendaciones:)/).filter(s => s.trim() !== '');
-                
-                sections.forEach(section => {
-                    const lines = section.split('\n').filter(l => l.trim() !== '');
-                    if (lines.length > 0) {
-                        const titleLine = lines[0].trim();
-                        let isSectionTitle = false;
+            }
+        } else {
+            doc.setFontSize(12);
+            doc.setTextColor(100, 100, 100);
+            doc.text("No hay informes para este paciente.", 14, 60);
+        }
 
-                        if (titleLine.startsWith('Observaciones Principales:') ||
-                            titleLine.startsWith('Posible Diagnóstico:') ||
-                            titleLine.startsWith('Recomendaciones:')) {
-                            isSectionTitle = true;
-                        }
-
-                        if (isSectionTitle) {
-                            y = addTextWithPagination(doc, titleLine, margin, y, pageWidth - 2 * margin, 8, 14, true);
-                            y += 4;
-                        } else {
-                            y = addTextWithPagination(doc, titleLine, margin, y, pageWidth - 2 * margin, 6, 12, false);
-                        }
-                        
-                        for (let i = 1; i < lines.length; i++) {
-                            const item = lines[i].trim();
-                            if (item.startsWith('- ')) {
-                                y = addTextWithPagination(doc, item.substring(2), margin + 5, y, pageWidth - 2 * margin - 5, 6, 12, false, true);
-                            } else {
-                                y = addTextWithPagination(doc, item, margin, y, pageWidth - 2 * margin, 6, 12);
-                            }
-                        }
-                        y += 8;
-                    }
-                });
-            
-                doc.setPage(doc.internal.getNumberOfPages());
-                let finalPageHeight = doc.internal.pageSize.getHeight();
-                let footerY = finalPageHeight - 40;
-
+        // Firma
+        const signatureText = 'Dr. [Nombre del Doctor]';
+        const signatureImgUrl = 'https://i.ibb.co/68v8z3F/Firma-Prueba.png'; 
+        const signatureImgWidth = 60;
+        const footerY = doc.internal.pageSize.height - 30;
+        const signatureAreaX = (doc.internal.pageSize.width - signatureImgWidth) / 2;
+        
+        if (signatureImgUrl) {
+            try {
+                const img = await fetch(signatureImgUrl).then(res => res.blob()).then(blob => new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                }));
+                doc.addImage(img, 'PNG', signatureAreaX, footerY, signatureImgWidth, 20);
                 doc.setFontSize(10);
                 doc.setTextColor(80, 80, 80);
-                doc.text(`Fecha del Informe: ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, footerY);
+                doc.text(signatureText, signatureAreaX + (signatureImgWidth / 2), footerY + 25, { align: 'center' });
+            } catch (error) {
+                console.error("Error al cargar la imagen de firma para PDF:", error);
+                doc.setFontSize(10);
+                doc.setTextColor(80, 80, 80);
+                doc.text('_________________________________', signatureAreaX + (signatureImgWidth / 2), footerY + 5, { align: 'center' });
+                doc.text(signatureText, signatureAreaX + (signatureImgWidth / 2), footerY + 10, { align: 'center' });
+            }
+        } else {
+            doc.setFontSize(10);
+            doc.setTextColor(80, 80, 80);
+            doc.text('_________________________________', signatureAreaX + (signatureImgWidth / 2), footerY + 5, { align: 'center' });
+            doc.text(signatureText, signatureAreaX + (signatureImgWidth / 2), footerY + 10, { align: 'center' });
+        }
+    
+        doc.save(`Informe_ColpoVision_${currentPatient.name}.pdf`);
+        showModal('PDF Exportado', 'El informe se ha exportado a PDF correctamente.');
+    };
+    
+    applySavedTheme();
+    loadPatients();
+    renderPatientList();
+    showScreen(screens.list);
 
-                const signatureImgWidth = 60;
-                const signatureText = 'Firma y Sello del Médico';
-                const signatureAreaX = pageWidth - margin - signatureImgWidth;
+    function applySavedTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.classList.add(savedTheme);
+        document.getElementById('theme-toggle').checked = (savedTheme === 'dark');
+    }
 
-                if (patient.signatureImageBase64) {
-                    try {
-                        const signatureImg = await loadImage(`data:image/png;base64,${patient.signatureImageBase64}`);
-                        let signatureImgHeight = (signatureImgWidth / signatureImg.naturalWidth) * signatureImg.naturalHeight;
-                        
-                        const imgSignatureY = Math.max(footerY - signatureImgHeight - 5, margin);
-                        
-                        doc.addImage(signatureImg.src, 'PNG', signatureAreaX, imgSignatureY, signatureImgWidth, signatureImgHeight);
-                        doc.setFontSize(10);
-                        doc.setTextColor(80, 80, 80);
-                        doc.text(signatureText, signatureAreaX + (signatureImgWidth / 2), footerY + 5, { align: 'center' });
-                    } catch (error) {
-                        console.error("Error al cargar la imagen de firma para PDF:", error);
-                        doc.setFontSize(10);
-                        doc.setTextColor(80, 80, 80);
-                        doc.text('_________________________________', signatureAreaX + (signatureImgWidth / 2), footerY, { align: 'center' });
-                        doc.text(signatureText, signatureAreaX + (signatureImgWidth / 2), footerY + 5, { align: 'center' });
-                    }
-                } else {
-                    doc.setFontSize(10);
-                    doc.setTextColor(80, 80, 80);
-                    doc.text('_________________________________', signatureAreaX + (signatureImgWidth / 2), footerY, { align: 'center' });
-                    doc.text(signatureText, signatureAreaX + (signatureImgWidth / 2), footerY + 5, { align: 'center' });
-                }
-            
-                doc.save(`Informe_ColpoVision_${patient.name}.pdf`);
-                showModal('PDF Exportado', 'El informe se ha exportado a PDF correctamente.');
-            });
-            
-            applySavedTheme();
-            loadPatients();
-            renderPatientList();
-            showScreen(screens.list);
-        };
-    </script>
+    document.getElementById('theme-toggle').addEventListener('change', (e) => {
+        if (e.target.checked) {
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
+    });
+
+</script>
 </body>
 </html>
